@@ -1,0 +1,7 @@
+{
+    "name": "as-file-proxy",
+    "version": "0.0.0",
+    "dependencies": {
+        "@types/node": "^12.7.2"
+    }
+}
