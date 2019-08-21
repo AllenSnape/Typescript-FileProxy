@@ -52,25 +52,54 @@ export class FileProxy implements IFileProxy {
   public init(config: FileProxyConfig): this {
     this.config = config;
 
-    // 处理依赖mapper
-    FileProxy.map(this._dependenciesMapper, config.dependencies);
     // 处理源码mapper
-    FileProxy.map(this._sourcesMapper, config.sources);
+    FileProxy.map(this._sourcesMapper, config.sources, config.output);
+
+    // 创建输出文件夹
+    if (fs.existsSync(config.output)) {
+      // 检查是否为一个文件夹, 如果是则抛出错误
+      if (!fs.statSync(config.output).isDirectory()) {
+        throw new Error('输出目录不是个目录, 请更改输出目录!');
+      }
+      // 清空文件夹
+      FileProxy.rmRf(config.output);
+    }
+    // 创建文件夹
+    fs.mkdirSync(config.output);
 
     // 拉取依赖
     this.pull();
     // 复制源代码
-    FileProxy.copyWithMapper(this._dependenciesMapper, config.output, true);
+    FileProxy.copyWithMapper(this._sourcesMapper, true);
 
     return this;
-  };
+  }
+
+  /**
+   * 读取依赖文件, 因为依赖文件改动性大, 且不应该覆盖源码文件
+   */
+  private readDependencies(): void {
+    // 处理依赖mapper
+    FileProxy.map(this._dependenciesMapper, config.dependencies, config.output);
+
+    // 如果依赖中输出的文件有和源码相同的, 则将其删除
+    for (const dk in this._dependenciesMapper) {
+      for (const sk in this._sourcesMapper) {
+        // noinspection JSUnfilteredForInLoop
+        if (this._dependenciesMapper[dk] === this._sourcesMapper[sk]) {
+          // noinspection JSUnfilteredForInLoop
+          delete this._dependenciesMapper[dk];
+        }
+      }
+    }
+  }
 
   public push(): this {
     // 反转复制
     for (const key in this._sourcesMapper) {
       if (this._sourcesMapper.hasOwnProperty(key)) {
         // 放置到输出目录中的路径
-        const modified = path.join(this.config.output, this._sourcesMapper[key]);
+        const modified = this._sourcesMapper[key];
         // 检查修改文件是否存在
         if (fs.existsSync(modified)) {
           if (fs.existsSync(key)) {
@@ -94,37 +123,40 @@ export class FileProxy implements IFileProxy {
     }
 
     return this;
-  };
+  }
 
   public pull(): this {
-    FileProxy.copyWithMapper(this._dependenciesMapper, config.output, false, true);
+    this.readDependencies();
+    FileProxy.copyWithMapper(this._dependenciesMapper, true, true);
     return this;
-  };
+  }
+
+  public modified(): boolean {
+    let flag = false;
+    for (const key in this._sourcesMapper) {
+      // noinspection JSUnfilteredForInLoop
+      if (
+        fs.existsSync(key) && fs.existsSync(this._sourcesMapper[key]) &&
+        md5(fs.readFileSync(key)) !== md5(fs.readFileSync(this._sourcesMapper[key]))
+      ) {
+        // noinspection JSUnfilteredForInLoop
+        console.log(key, '@', this._sourcesMapper[key], '文件已被修改, 请push或强制退出!');
+        flag = true;
+      }
+    }
+    return flag;
+  }
 
   /**
    * 根据mapper复制到目标文件夹
    * @param mapper mapper配置
-   * @param output 目标文件夹
    * @param override 如果文件已存在, 是否更改
    * @param readonly 输出的文件是否为只读文件
    */
   private static copyWithMapper(
-      mapper: FileProxyMapper, output: string,
+      mapper: FileProxyMapper,
       override: boolean = false, readonly: boolean = false
   ): void {
-    // 检查是否存在
-    if (fs.existsSync(output)) {
-      // 检查是否为一个文件夹, 如果是则抛出错误
-      if (!fs.statSync(output).isDirectory()) {
-        throw new Error('输出目录不是个目录, 请更改输出目录!');
-      }
-
-      // 清空文件夹
-      FileProxy.rmRf(output);
-    }
-
-    // 创建文件夹
-    fs.mkdirSync(output);
 
     // 开始复制
     for (const key in mapper) {
@@ -132,7 +164,7 @@ export class FileProxy implements IFileProxy {
         // 检查源文件是否存在, 不存在则直接跳过
         if (!fs.existsSync(key)) continue;
 
-        const mapperOutput = path.join(output, mapper[key]);
+        const mapperOutput = mapper[key];
         if (fs.existsSync(mapperOutput)) {
           if (override) {
             fs.unlinkSync(mapperOutput);
@@ -142,6 +174,11 @@ export class FileProxy implements IFileProxy {
         }
 
         console.log('copy', key, 'to', mapperOutput);
+
+        // 创建文件夹
+        const mapperOutputFolder = mapperOutput.substring(0, mapperOutput.lastIndexOf(path.sep));
+        if (!fs.existsSync(mapperOutputFolder)) fs.mkdirSync(mapperOutputFolder, { recursive: true });
+
         fs.copyFileSync(key, mapperOutput);
 
         if (readonly) {
@@ -155,8 +192,9 @@ export class FileProxy implements IFileProxy {
    * 解析路径, 并将结果放入mapper
    * @param mapper 放结果的mapper
    * @param files 扫描的文件或文件夹
+   * @param output 输出目录
    */
-  private static map(mapper: FileProxyMapper, files: SourceTarget[] | string | string []): FileProxyMapper {
+  private static map(mapper: FileProxyMapper, files: SourceTarget[] | string | string [], output: string): FileProxyMapper {
     // 清空mapper
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) delete mapper[key];
@@ -166,13 +204,13 @@ export class FileProxy implements IFileProxy {
     if (files instanceof Array) {
       files.forEach(file => {
         if (typeof file === 'string') {
-          this.getEverything(file).forEach(i => mapper[i] = i.substring(file.length));
+          this.getEverything(file).forEach(i => mapper[i] = path.join(output, i.substring(file.length)));
         } else {
-          this.getEverything(file.source).forEach(i => mapper[i] = path.join(file.target, i.substring(file.length)));
+          this.getEverything(file.source).forEach(i => mapper[i] = path.join(output, file.target, i.substring(file.length)));
         }
       });
     } else {
-      this.getEverything(files).forEach(i => mapper[i] = i.substring(files.length));
+      this.getEverything(files).forEach(i => mapper[i] = path.join(output, i.substring(files.length)));
     }
 
     return mapper;
@@ -251,6 +289,11 @@ export interface IFileProxy {
    * 刷新依赖文件, 并重新复制到输出目录中
    */
   pull: () => this;
+
+  /**
+   * 复制过去的源码文件是否被修改过
+   */
+  modified: () => boolean;
 
 }
 
@@ -341,33 +384,26 @@ input.on('data', data => {
     break;
 
     case '2':
-    case 'push': {
-      // TODO 读取修改文件
-    } 
-    break;
+    case 'push': fp.push(); break;
 
     case '3':
-    case 'pull': {
-      fp.pull();
-    } 
-    break;
-
-    case 'help':
-    case 'h': {
-      printDocument();
-    }
-    break;
+    case 'pull': fp.pull(); break;
 
     case '-':
-    case 'exit': 
-    {
+    case 'exit': {
       // 检查当前状态后退出
+      if (!fp.modified()) {
+        process.exit(0);
+      }
     }
     break;
-
     // 强制退出
     case '-f':
-    case 'exit-f': process.exit(0);
+    case 'exit-f': process.exit(0); break;
+
+    case 'help':
+    case 'h':
+    default: printDocument();
   }
   process.stdout.write('> ');
 });
