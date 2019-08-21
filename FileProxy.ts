@@ -1,6 +1,7 @@
-import {Stats} from "fs";
+import { Stats } from "fs";
 
 const fs = require('fs'), path = require('path'), input = process.stdin;
+const md5 = require('js-md5');
 
 // region 初始化
 
@@ -32,6 +33,11 @@ const printDocument = (): void => {
 export class FileProxy implements IFileProxy {
 
   /**
+   * 初始化时的配置
+   */
+  private config: FileProxyConfig = null;
+
+  /**
    * 源代码与输出文件夹路径对照
    * key: 源代码路径, value: 输出文件夹内的路径
    */
@@ -44,23 +50,54 @@ export class FileProxy implements IFileProxy {
   private readonly _dependenciesMapper: FileProxyMapper = {};
 
   public init(config: FileProxyConfig): this {
+    this.config = config;
+
     // 处理依赖mapper
     FileProxy.map(this._dependenciesMapper, config.dependencies);
     // 处理源码mapper
     FileProxy.map(this._sourcesMapper, config.sources);
 
+    // 拉取依赖
     this.pull();
+    // 复制源代码
+    FileProxy.copyWithMapper(this._dependenciesMapper, config.output, true);
 
     return this;
   };
 
   public push(): this {
-    // TODO
+    // 反转复制
+    for (const key in this._sourcesMapper) {
+      if (this._sourcesMapper.hasOwnProperty(key)) {
+        // 放置到输出目录中的路径
+        const modified = path.join(this.config.output, this._sourcesMapper[key]);
+        // 检查修改文件是否存在
+        if (fs.existsSync(modified)) {
+          if (fs.existsSync(key)) {
+            // 检查两个文件的md5, 不相同时才复制
+            if (md5(fs.readFileSync(modified)) !== md5(fs.readFileSync(key))) {
+              console.log('copy', modified, 'to', key);
+              fs.unlinkSync(key);
+              fs.copyFileSync(modified, key);
+            }
+          } else {
+            // 不存在时直接复制
+            fs.copyFileSync(modified, key);
+          }
+        } else {
+          // 不存在则一并删除源文件
+          if (fs.existsSync(key)) {
+            fs.unlinkSync(key);
+          }
+        }
+      }
+    }
+
     return this;
   };
 
   public pull(): this {
-    // TODO
+    FileProxy.copyWithMapper(this._dependenciesMapper, config.output, false, true);
     return this;
   };
 
@@ -83,16 +120,33 @@ export class FileProxy implements IFileProxy {
       }
 
       // 清空文件夹
-
-    } else {
-      // 创建文件夹
-      fs.mkdirSync(output);
+      FileProxy.rmRf(output);
     }
+
+    // 创建文件夹
+    fs.mkdirSync(output);
 
     // 开始复制
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) {
+        // 检查源文件是否存在, 不存在则直接跳过
+        if (!fs.existsSync(key)) continue;
 
+        const mapperOutput = path.join(output, mapper[key]);
+        if (fs.existsSync(mapperOutput)) {
+          if (override) {
+            fs.unlinkSync(mapperOutput);
+          } else {
+            continue;
+          }
+        }
+
+        console.log('copy', key, 'to', mapperOutput);
+        fs.copyFileSync(key, mapperOutput);
+
+        if (readonly) {
+          fs.chmodSync(mapperOutput, 0o444);
+        }
       }
     }
   }
@@ -122,6 +176,23 @@ export class FileProxy implements IFileProxy {
     }
 
     return mapper;
+  }
+
+  /**
+   * 清空一个文件夹
+   * @param folder 文件夹路径
+   */
+  private static rmRf(folder): void {
+    if (fs.existsSync(folder)) {
+      if (fs.statSync(folder).isDirectory()) {
+        for (const file of fs.readdirSync(folder)) {
+          this.rmRf(path.join(folder, file));
+        }
+        fs.rmdirSync(folder);
+      } else {
+        fs.unlinkSync(folder);
+      }
+    }
   }
 
   /**

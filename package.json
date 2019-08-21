@@ -2,6 +2,7 @@
     "name": "as-file-proxy",
     "version": "0.0.0",
     "dependencies": {
-        "@types/node": "^12.7.2"
+        "@types/node": "^12.7.2",
+        "js-md5": "^0.7.3"
     }
 }
