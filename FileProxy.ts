@@ -21,6 +21,7 @@ const printDocument = (): void => {
   console.log(' 1/re-init [配置文件]    : 重新初始化上次读取的文件; 配置文件存在时则会检查输出目录是否有未正常退出时留下的内容');
   console.log(' 2/push                  : 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中');
   console.log(' 3/pull                  : 刷新依赖文件, 并重新复制到输出目录中');
+  console.log(' 4/diff                  : 检查是否有修改了的文件');
   console.log(' h/helo                  : 打印该消息');
   console.log(' -/exit                  : 退出');
   console.log('-f/exit-f                : 强制退出');
@@ -157,7 +158,7 @@ export class FileProxy implements IFileProxy {
         md5(fs.readFileSync(key)) !== md5(fs.readFileSync(this._sourcesMapper[key]))
       ) {
         // noinspection JSUnfilteredForInLoop
-        console.log(key, '@', this._sourcesMapper[key], '文件已被修改, 请push或强制退出!');
+        console.log(key, '@', this._sourcesMapper[key], '文件已被修改');
         flag = true;
       }
     }
@@ -403,12 +404,14 @@ const startInteract = () => {
 
       case '1':
       case 're-init': {
-        if (args.length === 1 && config === null) {
-          console.warn('还没有初始化任何的配置文件!');
-        } else if (args.length > 1) {
-          init(args[1]);
-        } else {
-          init(config.path);
+        if (!fp.modified()) {
+          if (args.length === 1 && config === null) {
+            console.warn('还没有初始化任何的配置文件!');
+          } else if (args.length > 1) {
+            init(args[1]);
+          } else {
+            init(config.path);
+          }
         }
       }
         break;
@@ -418,6 +421,9 @@ const startInteract = () => {
 
       case '3':
       case 'pull': fp.pull(); break;
+
+      case '4':
+      case 'diff': fp.modified(); break;
 
       case '-':
       case 'exit': {
