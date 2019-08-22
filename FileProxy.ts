@@ -75,14 +75,18 @@ export class FileProxy implements IFileProxy {
     FileProxy.copyWithMapper(this._sourcesMapper, true);
 
     // 执行脚本
-    if (typeof config.after === 'string') {
-      config.after = [config.after];
-    }
-    for (const a of config.after) {
-      console.log('>', a);
-      const result = await exec(a, { cwd: config.output });
-      console.log(result.stdout);
-      if (result.stderr) console.error(result.stderr);
+    if (config.after) {
+      if (typeof config.after === 'string') {
+        config.after = [config.after];
+      }
+      for (const a of config.after) {
+        if (a) {
+          console.log('>', a);
+          const result = await exec(a, { cwd: config.output });
+          console.log(result.stdout);
+          if (result.stderr) console.error(result.stderr);
+        }
+      }
     }
 
     return this;
@@ -376,7 +380,7 @@ const fp: IFileProxy = new FileProxy();
 // 开始交互模式
 const startInteract = () => {
   input.on('data', data => {
-    data = data.toString().substring(0, data.length - 1);
+    data = data.toString().substring(0, data.length - (path.sep === '/' ? 1 : 2));
     const args = data.split(' ');
     switch(args[0]) {
       case '0':
@@ -435,7 +439,7 @@ const startInteract = () => {
  * @param file 初始化的文件
  * @param after 生成输出目录之后执行的脚本
  */
-const init = (file: string, after: string | string[] = []): void => {
+const init = (file: string, after: string | string[] = null): void => {
   file = FileProxy.parseFilepath(file);
 
   // 如果存在缓存中则清除缓存
@@ -454,7 +458,7 @@ const init = (file: string, after: string | string[] = []): void => {
         config.after.push(...after);
       }
     }
-    (fp.init(config) as Promise<IFileProxy>).then(() => after ? process.exit(0) : undefined);
+    (fp.init(config) as Promise<IFileProxy>).then(() => after ? process.exit(0) : undefined).catch(e => console.error(e));
   } catch (e) {
     console.error('初始化失败:', e);
   }
