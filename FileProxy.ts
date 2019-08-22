@@ -211,26 +211,34 @@ export class FileProxy implements IFileProxy {
    * @param files 扫描的文件或文件夹
    * @param output 输出目录
    */
-  private static map(mapper: FileProxyMapper, files: (SourceTarget | string)[] | string, output: string): FileProxyMapper {
+  private static map(mapper: FileProxyMapper, files: (SourceTarget | string)[] | string | SourceTarget, output: string): FileProxyMapper {
     // 清空mapper
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) delete mapper[key];
     }
 
     // 分类处理
-    if (files instanceof Array) {
-      files.forEach(file => {
-        if (typeof file === 'string') {
-          this.getEverything(file).forEach(i => mapper[i] = path.join(output, i.substring(file.length)));
-        } else {
-          this.getEverything(file.source).forEach(i => mapper[i] = path.join(output, file.target, i.substring(file.source.length)));
-        }
-      });
-    } else {
-      this.getEverything(files).forEach(i => mapper[i] = path.join(output, i.substring(files.length)));
+    if (!(files instanceof Array)) {
+      files = [files];
     }
+    files.forEach(file => {
+      if (typeof file === 'string') {
+        this.getEverything(file).forEach(i => mapper[i] = path.join(output, this.parseFileMap(file, i)));
+      } else {
+        this.getEverything(file.source).forEach(i => mapper[i] = path.join(output, file.target, this.parseFileMap(file.source, i)));
+      }
+    });
 
     return mapper;
+  }
+
+  /**
+   * 处理mapper出来的内容, 把源文件的地址转换为输出目录的地址
+   * @param from 源文件的地址
+   * @param to 输出目录的地址
+   */
+  private static parseFileMap(from: string, to: string): string {
+    return to === from ? from.substring(from.lastIndexOf(path.sep) + 1) : to.substring(from.length)
   }
 
   /**
@@ -339,14 +347,14 @@ export interface FileProxyConfig {
    * 内容可以是一个文件, 也可以是一个文件夹; 为文件夹时, 将会将其子文件和子文件夹一起进行操作
    * 内容不得是软链接或快捷方式, 因为这些可能造成循环依赖, 所以将被直接忽略
    */
-  dependencies: (SourceTarget | string)[] | string;
+  dependencies: (SourceTarget | string)[] | string | SourceTarget;
 
   /**
    * 源代码目录, 出现与dependencies相同文件时, 将使用该数据将其覆盖
    * 配置的内容如果不存在, 但输出的文件夹中却存在了, 在pull的时候也会将其复制回来
    * 内容规则与{@link FileProxyConfig.dependencies}一致
    */
-  sources: (SourceTarget | string)[] | string;
+  sources: (SourceTarget | string)[] | string | SourceTarget;
 
   /**
    * 生成输出目录之后执行的脚本
@@ -400,7 +408,7 @@ const startInteract = () => {
         } else if (args.length > 1) {
           init(args[1]);
         } else {
-          fp.init(config);
+          init(config.path);
         }
       }
         break;
