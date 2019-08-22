@@ -5,6 +5,7 @@ const config: FileProxyConfig = {
     output: '/Users/allensnape/Documents/Playground/Typescript/Typescript-FileProxy/test/output',
     sources: '/Users/allensnape/Documents/Playground/Typescript/Typescript-FileProxy/test/sources',
     dependencies: '/Users/allensnape/Documents/Playground/Typescript/Typescript-FileProxy/test/dependencies',
+    after: ['ls'],
 };
 
 module.exports = config;

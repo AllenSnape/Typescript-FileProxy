@@ -1,6 +1,7 @@
 import { Stats } from "fs";
 
 const fs = require('fs'), path = require('path'), input = process.stdin;
+const exec = require('util').promisify(require('child_process').exec);
 const md5 = require('js-md5');
 
 // region 初始化
@@ -13,6 +14,7 @@ input.setEncoding('utf-8');
  * 打印使用文档
  */
 const printDocument = (): void => {
+  console.log();
   console.log('正在使用的配置文件:', config ? (config.name + '@' + config.path) : '无');
   console.log();
   console.log(' 0/init <配置文件>       : 读取配置文件');
@@ -49,7 +51,7 @@ export class FileProxy implements IFileProxy {
    */
   private readonly _dependenciesMapper: FileProxyMapper = {};
 
-  public init(config: FileProxyConfig): this {
+  public async init(config: FileProxyConfig): Promise<this> {
     this.config = config;
 
     // 处理源码mapper
@@ -71,6 +73,17 @@ export class FileProxy implements IFileProxy {
     this.pull();
     // 复制源代码
     FileProxy.copyWithMapper(this._sourcesMapper, true);
+
+    // 执行脚本
+    if (typeof config.after === 'string') {
+      config.after = [config.after];
+    }
+    for (const a of config.after) {
+      console.log('>', a);
+      const result = await exec(a, { cwd: config.output });
+      console.log(result.stdout);
+      if (result.stderr) console.error(result.stderr);
+    }
 
     return this;
   }
@@ -278,7 +291,7 @@ export interface IFileProxy {
   /**
    * 根据配置文件进行初始化: 检查目标文件夹、生成文件/文件夹mapper
    */
-  init: (config: FileProxyConfig) => this;
+  init: (config: FileProxyConfig) => this | Promise<this>;
 
   /**
    * 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中
@@ -331,6 +344,12 @@ export interface FileProxyConfig {
    */
   sources: SourceTarget[] | string | string[];
 
+  /**
+   * 生成输出目录之后执行的脚本
+   * 如果是多条命令, 默认目录是输出目录文件夹路径, 并且彼此之间无关联, 如果需要多条命令一起执行, 请使用脚本文件
+   */
+  after?: string | string[];
+
 }
 
 /**
@@ -352,67 +371,71 @@ interface SourceTarget {
 
 // endregion
 
-printDocument();
-process.stdout.write('> ');
-
+// 实例
 const fp: IFileProxy = new FileProxy();
-
-input.on('data', data => {
-  data = data.toString().substring(0, data.length - 1);
-  const args = data.split(' ');
-  switch(args[0]) {
-    case '0':
-    case 'init': {
-      if (args.length < 2) {
-        console.warn('请添加配置文件!');
-      } else {
-        init(args[1]);
+// 开始交互模式
+const startInteract = () => {
+  input.on('data', data => {
+    data = data.toString().substring(0, data.length - 1);
+    const args = data.split(' ');
+    switch(args[0]) {
+      case '0':
+      case 'init': {
+        if (args.length < 2) {
+          console.warn('请添加配置文件!');
+        } else {
+          init(args[1]);
+        }
       }
-    }
-    break;
+        break;
 
-    case '1':
-    case 're-init': {
-      if (args.length === 1 && config === null) {
-        console.warn('还没有初始化任何的配置文件!');
-      } else if (args.length > 1) {
-        init(args[1]);
-      } else {
-        fp.init(config);
+      case '1':
+      case 're-init': {
+        if (args.length === 1 && config === null) {
+          console.warn('还没有初始化任何的配置文件!');
+        } else if (args.length > 1) {
+          init(args[1]);
+        } else {
+          fp.init(config);
+        }
       }
-    }
-    break;
+        break;
 
-    case '2':
-    case 'push': fp.push(); break;
+      case '2':
+      case 'push': fp.push(); break;
 
-    case '3':
-    case 'pull': fp.pull(); break;
+      case '3':
+      case 'pull': fp.pull(); break;
 
-    case '-':
-    case 'exit': {
-      // 检查当前状态后退出
-      if (!fp.modified()) {
-        process.exit(0);
+      case '-':
+      case 'exit': {
+        // 检查当前状态后退出
+        if (!fp.modified()) {
+          process.exit(0);
+        }
       }
-    }
-    break;
-    // 强制退出
-    case '-f':
-    case 'exit-f': process.exit(0); break;
+        break;
+      // 强制退出
+      case '-f':
+      case 'exit-f': process.exit(0); break;
 
-    case 'help':
-    case 'h':
-    default: printDocument();
-  }
+      case 'help':
+      case 'h':
+      default: printDocument();
+    }
+    process.stdout.write('> ');
+  });
+
+  printDocument();
   process.stdout.write('> ');
-});
+};
 
 /**
  * 初始化
- * @param file
+ * @param file 初始化的文件
+ * @param after 生成输出目录之后执行的脚本
  */
-const init = (file: string): void => {
+const init = (file: string, after: string | string[] = []): void => {
   file = FileProxy.parseFilepath(file);
 
   // 如果存在缓存中则清除缓存
@@ -422,8 +445,30 @@ const init = (file: string): void => {
 
   try {
     config = require(file) as FileProxyConfig;
-    fp.init(config);
+    config.path = file;
+    config.after = config.after ? (typeof config.after === 'string' ? [config.after] : config.after) : [];
+    if (after) {
+      if (typeof after === 'string') {
+        config.after.push(after);
+      } else {
+        config.after.push(...after);
+      }
+    }
+    (fp.init(config) as Promise<IFileProxy>).then(() => after ? process.exit(0) : undefined);
   } catch (e) {
     console.error('初始化失败:', e);
   }
 };
+
+// 解析入参
+
+// ts-node FileProxy.ts [默认配置文件] [输出文档生成之后调用的脚本 [脚本2] ...]
+if (process.argv.length > 3) {
+  init(process.argv[2], process.argv.slice(3));
+} else {
+  // ts-node FileProxy.ts [默认配置文件]
+  if (process.argv.length === 3) {
+    init(process.argv[2]);
+  }
+  startInteract();
+}
