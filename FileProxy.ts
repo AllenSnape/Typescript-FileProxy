@@ -222,6 +222,11 @@ export class FileProxy implements IFileProxy {
         // 输出的文件
         const mapperOutput = mapper[key].target;
 
+        // 存在且不为文件时, 直接删除
+        if (fs.existsSync(mapperOutput) && !fs.statSync(mapperOutput).isFile()) {
+          this.rmRf(mapperOutput);
+        }
+
         // 检查输出文件夹中的文件是否存在
         const exists = outputs.find(o => o.target === mapperOutput);
         if (exists) {
