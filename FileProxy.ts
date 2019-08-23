@@ -14,20 +14,20 @@ input.setEncoding('utf-8');
  * 打印使用文档
  */
 const printDocument = (): void => {
-  console.log();
-  console.log('正在使用的配置文件:', config ? (config.name + '@' + config.path) : '无');
-  console.log();
-  console.log(' 0/init <配置文件>       : 读取配置文件');
-  console.log(' 1/re-init [配置文件]    : 重新初始化上次读取的文件; 配置文件存在时则会检查输出目录是否有未正常退出时留下的内容');
-  console.log(' 2/push                  : 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中');
-  console.log(' 3/pull                  : 刷新依赖文件, 并重新复制到输出目录中');
-  console.log(' 4/diff                  : 检查是否有修改了的文件');
-  console.log(' h/help                  : 打印该消息');
-  console.log(' -/exit                  : 退出');
-  console.log('-f/exit-f                : 强制退出');
-  console.log();
-  console.log('启动后不要移动任意关联的文件夹, 或更改源代码文件!');
-  console.log();
+  console.info();
+  console.info('正在使用的配置文件:', config ? (config.name + '@' + config.path) : '无');
+  console.info();
+  console.info(' 0/init <配置文件>       : 读取配置文件');
+  console.info(' 1/re-init [配置文件]    : 重新初始化上次读取的文件');
+  console.info(' 2/push                  : 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中');
+  console.info(' 3/pull                  : 刷新依赖文件, 并重新复制到输出目录中');
+  console.info(' 4/diff                  : 检查是否有修改了的文件');
+  console.info(' h/help                  : 打印该消息');
+  console.info(' -/exit                  : 退出');
+  console.info('-f/exit-f                : 强制退出');
+  console.info();
+  console.info('启动后不要移动任意关联的文件夹, 或更改源代码文件!');
+  console.info();
 };
 
 /**
@@ -122,21 +122,20 @@ export class FileProxy implements IFileProxy {
         const modified = changes[key];
         // 检查修改文件是否存在
         if (modified.deleted !== true) {
+          // 存在则删除后复制
           if (fs.existsSync(key)) {
-            // 检查两个文件的hash, 不相同时才复制
-            if (modified.hash !== FileProxy.getFileHash(modified.target)) {
-              console.log('copy', modified.target, 'to', key);
-              fs.unlinkSync(key);
-              fs.copyFileSync(modified.target, key);
-            }
+            console.info('copy', modified.target, 'to', key);
+            fs.unlinkSync(key);
+            fs.copyFileSync(modified.target, key);
           } else {
             // 不存在时直接复制
-            console.log('copy', modified.target, 'to', key);
+            console.info('new', key);
             fs.copyFileSync(modified.target, key);
           }
         } else {
           // 不存在则一并删除源文件
           if (fs.existsSync(key)) {
+            console.info('delete', key);
             fs.unlinkSync(key);
           }
         }
@@ -181,7 +180,7 @@ export class FileProxy implements IFileProxy {
           output = this.config.sources.target;
         }
         source = path.join(source, o.target.substring(this.config.output.length + output.length));
-        console.log(source, '@', o.target, 'new');
+        console.info(source, '@', o.target, 'new');
         files[source] = { target: o.target };
       }
     });
@@ -192,15 +191,15 @@ export class FileProxy implements IFileProxy {
         const value = this._sourcesMapper[key];
         // 如果输出目录的源代码文件被删了, 则标记
         if (!fs.existsSync(value.target)) {
-          console.log(key, '@', value.target, 'deleted');
+          console.info(key, '@', value.target, 'deleted');
           files[key] = Object.assign({}, value, { deleted: true });
         } else if (fs.existsSync(key) && FileProxy.getFileHash(value.target) !== value.hash) {
-          console.log(key, '@', value.target, 'changed');
+          console.info(key, '@', value.target, 'changed');
           files[key] = value;
         }
       }
     }
-    console.log();
+    console.info();
 
     return files;
   }
@@ -484,44 +483,55 @@ const startInteract = () => {
         } else {
           init(args[1]);
         }
-      }
-        break;
+      } break;
 
       case '1':
       case 're-init': {
-        if (!fp.modified()) {
-          if (args.length === 1 && config === null) {
-            console.warn('还没有初始化任何的配置文件!');
-          } else if (args.length > 1) {
-            init(args[1]);
-          } else {
-            init(config.path);
-          }
+        if (config && Object.keys(fp.modified()).length !== 0) {
+          console.warn('当前存在未提交代码!');
+        } else if (args.length === 1 && config === null) {
+          console.warn('还没有初始化任何的配置文件!');
+        } else if (args.length > 1) {
+          init(args[1]);
+        } else {
+          init(config.path);
         }
-      }
-        break;
+      } break;
 
       case '2':
-      case 'push': fp.push(); break;
+      case 'push': if (config) {
+        fp.push();
+      } else {
+        console.warn('请先初始化!');
+      } break;
 
       case '3':
-      case 'pull': fp.pull(); break;
+      case 'pull': if (config) {
+        fp.pull();
+      } else {
+        console.warn('请先初始化!');
+      } break;
 
       case '4':
-      case 'diff': fp.modified(); break;
+      case 'diff': if (config) {
+        fp.modified();
+      } else {
+        console.warn('请先初始化!');
+      } break;
 
       case '-':
       case 'exit': {
         // 检查当前状态后退出
-        if (Object.keys(fp.modified()).length === 0) {
+        if (config && Object.keys(fp.modified()).length === 0) {
           process.exit(0);
         }
-      }
-        break;
+      } break;
+
       // 强制退出
       case '-f':
       case 'exit-f': process.exit(0); break;
 
+      // 帮助
       case 'help':
       case 'h':
       default: printDocument();
