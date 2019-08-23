@@ -4,5 +4,9 @@
     "dependencies": {
         "@types/node": "^12.7.2",
         "js-md5": "^0.7.3"
+    },
+    "scripts": {
+        "start": "ts-node FileProxy.ts",
+        "test": "ts-node FileProxy.ts test.config.ts"
     }
 }

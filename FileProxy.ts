@@ -22,11 +22,11 @@ const printDocument = (): void => {
   console.log(' 2/push                  : 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中');
   console.log(' 3/pull                  : 刷新依赖文件, 并重新复制到输出目录中');
   console.log(' 4/diff                  : 检查是否有修改了的文件');
-  console.log(' h/helo                  : 打印该消息');
+  console.log(' h/help                  : 打印该消息');
   console.log(' -/exit                  : 退出');
   console.log('-f/exit-f                : 强制退出');
   console.log();
-  console.log('启动后不要移动文件夹!');
+  console.log('启动后不要移动任意关联的文件夹, 或更改源代码文件!');
   console.log();
 };
 
@@ -58,22 +58,21 @@ export class FileProxy implements IFileProxy {
     // 处理源码mapper
     FileProxy.map(this._sourcesMapper, config.sources, config.output);
 
-    // 创建输出文件夹
+    // 检查输出文件夹
     if (fs.existsSync(config.output)) {
       // 检查是否为一个文件夹, 如果是则抛出错误
       if (!fs.statSync(config.output).isDirectory()) {
         throw new Error('输出目录不是个目录, 请更改输出目录!');
       }
-      // 清空文件夹
-      FileProxy.rmRf(config.output);
+    } else {
+      // 创建文件夹
+      fs.mkdirSync(config.output);
     }
-    // 创建文件夹
-    fs.mkdirSync(config.output);
 
     // 拉取依赖
     this.pull();
     // 复制源代码
-    FileProxy.copyWithMapper(this._sourcesMapper, true);
+    FileProxy.copyWithMapper(this._sourcesMapper, this.config.output);
 
     // 执行脚本
     if (config.after) {
@@ -113,23 +112,27 @@ export class FileProxy implements IFileProxy {
   }
 
   public push(): this {
+    // 获取更改了的内容
+    const changes = this.modified();
+
     // 反转复制
-    for (const key in this._sourcesMapper) {
-      if (this._sourcesMapper.hasOwnProperty(key)) {
+    for (const key in changes) {
+      if (changes.hasOwnProperty(key)) {
         // 放置到输出目录中的路径
-        const modified = this._sourcesMapper[key];
+        const modified = changes[key];
         // 检查修改文件是否存在
-        if (fs.existsSync(modified)) {
+        if (modified.deleted !== true) {
           if (fs.existsSync(key)) {
-            // 检查两个文件的md5, 不相同时才复制
-            if (md5(fs.readFileSync(modified)) !== md5(fs.readFileSync(key))) {
-              console.log('copy', modified, 'to', key);
+            // 检查两个文件的hash, 不相同时才复制
+            if (modified.hash !== FileProxy.getFileHash(modified.target)) {
+              console.log('copy', modified.target, 'to', key);
               fs.unlinkSync(key);
-              fs.copyFileSync(modified, key);
+              fs.copyFileSync(modified.target, key);
             }
           } else {
             // 不存在时直接复制
-            fs.copyFileSync(modified, key);
+            console.log('copy', modified.target, 'to', key);
+            fs.copyFileSync(modified.target, key);
           }
         } else {
           // 不存在则一并删除源文件
@@ -140,55 +143,95 @@ export class FileProxy implements IFileProxy {
       }
     }
 
+    // 刷新源代码mapper
+    FileProxy.map(this._sourcesMapper, config.sources, config.output);
+
     return this;
   }
 
   public pull(): this {
     this.readDependencies();
-    FileProxy.copyWithMapper(this._dependenciesMapper, true, true);
+    FileProxy.copyWithMapper(this._dependenciesMapper, this.config.output);
     return this;
   }
 
-  public modified(): boolean {
-    let flag = false;
-    for (const key in this._sourcesMapper) {
+  public modified(): FileProxyMapper {
+    // 是否被修改/新增的文件
+    const files = {};
+
+    // 检查是否存在依赖和源代码之外的文件, 如果存在则标记为源代码文件
+    const outputs = FileProxy.getEverything(this.config.output, true);
+    // 合并依赖和源代码mapper
+    const exists = Object.assign({}, this._dependenciesMapper, this._sourcesMapper);
+    const outputMapper: FileProxyMapper = {};
+    for (const key in exists) {
       // noinspection JSUnfilteredForInLoop
-      if (
-        fs.existsSync(key) && fs.existsSync(this._sourcesMapper[key]) &&
-        md5(fs.readFileSync(key)) !== md5(fs.readFileSync(this._sourcesMapper[key]))
-      ) {
-        // noinspection JSUnfilteredForInLoop
-        console.log(key, '@', this._sourcesMapper[key], '文件已被修改');
-        flag = true;
+      outputMapper[exists[key].target] = Object.assign({}, exists[key], { target: key });
+    }
+    const outputMapperKeys = Object.keys(outputMapper);
+    // 找出新文件
+    outputs.filter(o => {
+      if (!outputMapperKeys.includes(o.target)) {
+        let source = '';
+        let output = '';
+        if (typeof this.config.sources === 'string') {
+          source = this.config.sources;
+        } else {
+          source = this.config.sources.source;
+          output = this.config.sources.target;
+        }
+        source = path.join(source, o.target.substring(this.config.output.length + output.length));
+        console.log(source, '@', o.target, 'new');
+        files[source] = { target: o.target };
+      }
+    });
+
+    // 检查指定的源文件是否存在修改的内容
+    for (const key in this._sourcesMapper) {
+      if (this._sourcesMapper.hasOwnProperty(key)) {
+        const value = this._sourcesMapper[key];
+        // 如果输出目录的源代码文件被删了, 则标记
+        if (!fs.existsSync(value.target)) {
+          console.log(key, '@', value.target, 'deleted');
+          files[key] = Object.assign({}, value, { deleted: true });
+        } else if (fs.existsSync(key) && FileProxy.getFileHash(value.target) !== value.hash) {
+          console.log(key, '@', value.target, 'changed');
+          files[key] = value;
+        }
       }
     }
-    return flag;
+    console.log();
+
+    return files;
   }
 
   /**
    * 根据mapper复制到目标文件夹
    * @param mapper mapper配置
-   * @param override 如果文件已存在, 是否更改
-   * @param readonly 输出的文件是否为只读文件
+   * @param output 输出目录, 用于检查后按需复制文件
    */
   private static copyWithMapper(
-      mapper: FileProxyMapper,
-      override: boolean = false, readonly: boolean = false
+      mapper: FileProxyMapper, output: string
   ): void {
+    // 获取输出目录内容
+    const outputs = this.getEverything(output);
 
     // 开始复制
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) {
-        // 检查源文件是否存在, 不存在则直接跳过
-        if (!fs.existsSync(key)) continue;
+        // 输出的文件
+        const mapperOutput = mapper[key].target;
 
-        const mapperOutput = mapper[key];
-        if (fs.existsSync(mapperOutput)) {
-          if (override) {
-            fs.unlinkSync(mapperOutput);
-          } else {
-            continue;
-          }
+        // 源文件不存在 或 源文件不是个文件 或 目标文件不是个文件 时 直接跳过
+        if (!fs.existsSync(key) || !fs.statSync(key).isFile() || !fs.existsSync(mapperOutput)) continue;
+        // 如果目标文件不是个文件时, 则先将他删了
+        if (!fs.statSync(mapperOutput).isFile()) {
+          this.rmRf(mapperOutput);
+        } else {
+          // 检查输出文件夹中的文件是否存在
+          const exists = outputs.find(o => o.target === mapperOutput);
+          // 检查hash是否相同, 相同则不复制
+          if (exists && exists.hash === mapper[key].hash) continue;
         }
 
         console.log('copy', key, 'to', mapperOutput);
@@ -199,7 +242,7 @@ export class FileProxy implements IFileProxy {
 
         fs.copyFileSync(key, mapperOutput);
 
-        if (readonly) {
+        if (mapper[key].readonly) {
           fs.chmodSync(mapperOutput, 0o444);
         }
       }
@@ -211,8 +254,9 @@ export class FileProxy implements IFileProxy {
    * @param mapper 放结果的mapper
    * @param files 扫描的文件或文件夹
    * @param output 输出目录
+   * @param readonly 是否标记为只读文件
    */
-  private static map(mapper: FileProxyMapper, files: (SourceTarget | string)[] | string | SourceTarget, output: string): FileProxyMapper {
+  private static map(mapper: FileProxyMapper, files: (SourceTarget | string)[] | string | SourceTarget, output: string, readonly: boolean = false): FileProxyMapper {
     // 清空mapper
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) delete mapper[key];
@@ -223,10 +267,9 @@ export class FileProxy implements IFileProxy {
       files = [files];
     }
     files.forEach(file => {
-      if (typeof file === 'string') {
-        this.getEverything(file).forEach(i => mapper[i] = path.join(output, this.parseFileMap(file, i)));
-      } else {
-        this.getEverything(file.source).forEach(i => mapper[i] = path.join(output, file.target, this.parseFileMap(file.source, i)));
+      if (file) {
+        file = typeof file === 'string' ? file : file.source;
+        this.getEverything(file, readonly).forEach(i => mapper[i.target] = { target: path.join(output, this.parseFileMap(file as string, i.target)), hash: i.hash });
       }
     });
 
@@ -262,17 +305,20 @@ export class FileProxy implements IFileProxy {
   /**
    * 读取文件夹下所有的内容 -> 将忽略软链接和快捷方式进行
    * @param file 读取的文件/文件夹
+   * @param readonly 扫描出来的文件是否标记为只读
    */
-  private static getEverything(file: string): string[] {
+  private static getEverything(file: string, readonly: boolean = false): FileProxyFile[] {
     const all = [];
     if (fs.existsSync(file)) {
       const stats: Stats = fs.statSync(file);
       if (stats.isFile()) {
-        return [ file ];
-      } else {
+        return [ { hash: FileProxy.getFileHash(file), target: file, readonly } ];
+      } else if (stats.isDirectory()) {
         for (const subFile of fs.readdirSync(file)) {
-          all.push(...this.getEverything(path.join(file, subFile)));
+          all.push(...this.getEverything(path.join(file, subFile), readonly));
         }
+      } else {
+        console.warn('不支持的路径类型:', file);
       }
     }
     return all;
@@ -287,13 +333,24 @@ export class FileProxy implements IFileProxy {
     return /^([a-zA-Z]:\/|\/|\.\/)/.test(filepath) ? filepath : ('./' + filepath);
   }
 
+  /**
+   * 获取文件hash值
+   * @param file 文件路径
+   */
+  public static getFileHash(file: string): string | null {
+    if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+      return md5(fs.readFileSync(file));
+    }
+    return null;
+  }
+
 }
 
 /**
  * 路径映射
  */
 export interface FileProxyMapper {
-  [key: string]: string;
+  [key: string]: FileProxyFile;
 }
 
 /**
@@ -318,8 +375,9 @@ export interface IFileProxy {
 
   /**
    * 复制过去的源码文件是否被修改过
+   * @return 被修改了或新增的文件
    */
-  modified: () => boolean;
+  modified: () => FileProxyMapper;
 
 }
 
@@ -355,13 +413,40 @@ export interface FileProxyConfig {
    * 配置的内容如果不存在, 但输出的文件夹中却存在了, 在pull的时候也会将其复制回来
    * 内容规则与{@link FileProxyConfig.dependencies}一致
    */
-  sources: (SourceTarget | string)[] | string | SourceTarget;
+  sources: string | SourceTarget;
 
   /**
    * 生成输出目录之后执行的脚本
    * 如果是多条命令, 默认目录是输出目录文件夹路径, 并且彼此之间无关联, 如果需要多条命令一起执行, 请使用脚本文件
    */
   after?: string | string[];
+
+}
+
+/**
+ * 文件代理器中的文件信息
+ */
+export interface FileProxyFile {
+
+  /**
+   * 当前文件的hash值
+   */
+  hash: string;
+
+  /**
+   * 对应的目标路径
+   */
+  target: string;
+
+  /**
+   * 是否为只读文件
+   */
+  readonly?: boolean;
+
+  /**
+   * 是否标记为删除了
+   */
+  deleted?: boolean;
 
 }
 
@@ -428,7 +513,7 @@ const startInteract = () => {
       case '-':
       case 'exit': {
         // 检查当前状态后退出
-        if (!fp.modified()) {
+        if (Object.keys(fp.modified()).length === 0) {
           process.exit(0);
         }
       }
