@@ -225,13 +225,13 @@ export class FileProxy implements IFileProxy {
         // 检查输出文件夹中的文件是否存在
         const exists = outputs.find(o => o.target === mapperOutput);
         if (exists) {
-          // 如果目标文件存在且不是个文件时, 则先将他删了
-          if (!fs.statSync(mapperOutput).isFile()) {
-            this.rmRf(mapperOutput);
-          }
           // 检查hash是否相同, 相同则不复制
-          else if (exists.hash === mapper[key].hash) {
+          if (exists.hash === mapper[key].hash) {
             continue;
+          }
+          // 不同则先删除
+          else {
+            this.rmRf(mapperOutput);
           }
         }
 
