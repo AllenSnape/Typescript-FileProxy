@@ -100,10 +100,10 @@ export class FileProxy implements IFileProxy {
     FileProxy.map(this._dependenciesMapper, config.dependencies, config, true);
 
     // 如果依赖中输出的文件有和源码相同的, 则将其删除
-    for (const dk in this._dependenciesMapper) {
-      for (const sk in this._sourcesMapper) {
+    for (const sk in this._sourcesMapper) {
+      for (const dk in this._dependenciesMapper) {
         // noinspection JSUnfilteredForInLoop
-        if (this._dependenciesMapper[dk] === this._sourcesMapper[sk]) {
+        if (this._dependenciesMapper[dk].target === this._sourcesMapper[sk].target) {
           // noinspection JSUnfilteredForInLoop
           delete this._dependenciesMapper[dk];
         }
