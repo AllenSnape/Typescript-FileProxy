@@ -15,7 +15,7 @@ input.setEncoding('utf-8');
  */
 const printDocument = (): void => {
   console.info();
-  console.info('正在使用的配置文件:', config ? (config.name + '@' + config.path) : '无');
+  console.info('正在使用的配置文件:', config ? (config.name + ' @ ' + config.path) : '无');
   console.info();
   console.info(' 0/init <配置文件>       : 读取配置文件');
   console.info(' 1/re-init [配置文件]    : 重新初始化上次读取的文件');
@@ -218,19 +218,23 @@ export class FileProxy implements IFileProxy {
     // 开始复制
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) {
+        // 源文件不存在则直接跳过
+        if (!fs.existsSync(key)) continue;
+
         // 输出的文件
         const mapperOutput = mapper[key].target;
 
-        // 源文件不存在 或 源文件不是个文件 或 目标文件不是个文件 时 直接跳过
-        if (!fs.existsSync(key) || !fs.statSync(key).isFile() || !fs.existsSync(mapperOutput)) continue;
-        // 如果目标文件不是个文件时, 则先将他删了
-        if (!fs.statSync(mapperOutput).isFile()) {
-          this.rmRf(mapperOutput);
-        } else {
-          // 检查输出文件夹中的文件是否存在
-          const exists = outputs.find(o => o.target === mapperOutput);
+        // 检查输出文件夹中的文件是否存在
+        const exists = outputs.find(o => o.target === mapperOutput);
+        if (exists) {
+          // 如果目标文件存在且不是个文件时, 则先将他删了
+          if (!fs.statSync(mapperOutput).isFile()) {
+            this.rmRf(mapperOutput);
+          }
           // 检查hash是否相同, 相同则不复制
-          if (exists && exists.hash === mapper[key].hash) continue;
+          else if (exists.hash === mapper[key].hash) {
+            continue;
+          }
         }
 
         console.log('copy', key, 'to', mapperOutput);
@@ -267,8 +271,12 @@ export class FileProxy implements IFileProxy {
     }
     files.forEach(file => {
       if (file) {
-        file = typeof file === 'string' ? file : file.source;
-        this.getEverything(file, readonly).forEach(i => mapper[i.target] = { target: path.join(output, this.parseFileMap(file as string, i.target)), hash: i.hash });
+        let prefix = '';
+        if (typeof file !== 'string') {
+          prefix = file.target;
+          file = file.source;
+        }
+        this.getEverything(file, readonly).forEach(i => mapper[i.target] = { target: path.join(output, prefix, this.parseFileMap(file as string, i.target)), hash: i.hash });
       }
     });
 
