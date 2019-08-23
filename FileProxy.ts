@@ -56,7 +56,7 @@ export class FileProxy implements IFileProxy {
     this.config = config;
 
     // 处理源码mapper
-    FileProxy.map(this._sourcesMapper, config.sources, config.output);
+    FileProxy.map(this._sourcesMapper, config.sources, config);
 
     // 检查输出文件夹
     if (fs.existsSync(config.output)) {
@@ -72,7 +72,7 @@ export class FileProxy implements IFileProxy {
     // 拉取依赖
     this.pull();
     // 复制源代码
-    FileProxy.copyWithMapper(this._sourcesMapper, this.config.output);
+    FileProxy.copyWithMapper(this._sourcesMapper, this.config);
 
     // 执行脚本
     if (config.after) {
@@ -97,7 +97,7 @@ export class FileProxy implements IFileProxy {
    */
   private readDependencies(): void {
     // 处理依赖mapper
-    FileProxy.map(this._dependenciesMapper, config.dependencies, config.output);
+    FileProxy.map(this._dependenciesMapper, config.dependencies, config, true);
 
     // 如果依赖中输出的文件有和源码相同的, 则将其删除
     for (const dk in this._dependenciesMapper) {
@@ -143,14 +143,14 @@ export class FileProxy implements IFileProxy {
     }
 
     // 刷新源代码mapper
-    FileProxy.map(this._sourcesMapper, config.sources, config.output);
+    FileProxy.map(this._sourcesMapper, config.sources, config);
 
     return this;
   }
 
   public pull(): this {
     this.readDependencies();
-    FileProxy.copyWithMapper(this._dependenciesMapper, this.config.output);
+    FileProxy.copyWithMapper(this._dependenciesMapper, this.config);
     return this;
   }
 
@@ -159,7 +159,7 @@ export class FileProxy implements IFileProxy {
     const files = {};
 
     // 检查是否存在依赖和源代码之外的文件, 如果存在则标记为源代码文件
-    const outputs = FileProxy.getEverything(this.config.output, true);
+    const outputs = FileProxy.getEverything(this.config.output, true, this.config.ignores);
     // 合并依赖和源代码mapper
     const exists = Object.assign({}, this._dependenciesMapper, this._sourcesMapper);
     const outputMapper: FileProxyMapper = {};
@@ -207,13 +207,11 @@ export class FileProxy implements IFileProxy {
   /**
    * 根据mapper复制到目标文件夹
    * @param mapper mapper配置
-   * @param output 输出目录, 用于检查后按需复制文件
+   * @param config 配置
    */
-  private static copyWithMapper(
-      mapper: FileProxyMapper, output: string
-  ): void {
+  private static copyWithMapper(mapper: FileProxyMapper, config: FileProxyConfig): void {
     // 获取输出目录内容
-    const outputs = this.getEverything(output);
+    const outputs = this.getEverything(config.output, true, config.ignores);
 
     // 开始复制
     for (const key in mapper) {
@@ -256,10 +254,15 @@ export class FileProxy implements IFileProxy {
    * 解析路径, 并将结果放入mapper
    * @param mapper 放结果的mapper
    * @param files 扫描的文件或文件夹
-   * @param output 输出目录
+   * @param config 配置
    * @param readonly 是否标记为只读文件
    */
-  private static map(mapper: FileProxyMapper, files: (SourceTarget | string)[] | string | SourceTarget, output: string, readonly: boolean = false): FileProxyMapper {
+  private static map(
+      mapper: FileProxyMapper,
+      files: (SourceTarget | string)[] | string | SourceTarget,
+      config: FileProxyConfig,
+      readonly: boolean = false
+  ): FileProxyMapper {
     // 清空mapper
     for (const key in mapper) {
       if (mapper.hasOwnProperty(key)) delete mapper[key];
@@ -276,7 +279,7 @@ export class FileProxy implements IFileProxy {
           prefix = file.target;
           file = file.source;
         }
-        this.getEverything(file, readonly).forEach(i => mapper[i.target] = { target: path.join(output, prefix, this.parseFileMap(file as string, i.target)), hash: i.hash });
+        this.getEverything(file, readonly, config.ignores).forEach(i => mapper[i.target] = Object.assign({}, i, { target: path.join(config.output, prefix, this.parseFileMap(file as string, i.target)) }));
       }
     });
 
@@ -313,16 +316,34 @@ export class FileProxy implements IFileProxy {
    * 读取文件夹下所有的内容 -> 将忽略软链接和快捷方式进行
    * @param file 读取的文件/文件夹
    * @param readonly 扫描出来的文件是否标记为只读
+   * @param ignores 忽略的内容
    */
-  private static getEverything(file: string, readonly: boolean = false): FileProxyFile[] {
+  private static getEverything(file: string, readonly: boolean = false, ignores: ignoreType | ignoreType[] = []): FileProxyFile[] {
     const all = [];
+
+    if (ignores) {
+      if (!(ignores instanceof Array)) {
+        ignores = [ ignores ];
+      }
+      for (const i of ignores) {
+        if (
+            (typeof i === 'string' && file === i) ||
+            (i instanceof RegExp && i.test(file)) ||
+            (typeof i !== 'string' && 'startsWith' in (i as any) && file.startsWith((i as ignoreStartsWith).startsWith)) ||
+            (typeof i !== 'string' && 'endsWith' in (i as any) && file.startsWith((i as ignoreEndsWith).endsWith))
+        ) {
+          return all;
+        }
+      }
+    }
+
     if (fs.existsSync(file)) {
       const stats: Stats = fs.statSync(file);
       if (stats.isFile()) {
         return [ { hash: FileProxy.getFileHash(file), target: file, readonly } ];
       } else if (stats.isDirectory()) {
         for (const subFile of fs.readdirSync(file)) {
-          all.push(...this.getEverything(path.join(file, subFile), readonly));
+          all.push(...this.getEverything(path.join(file, subFile), readonly, ignores));
         }
       } else {
         console.warn('不支持的路径类型:', file);
@@ -389,6 +410,13 @@ export interface IFileProxy {
 }
 
 /**
+ * 忽略的类型, 字符串是直接去匹配, startsWith用的{@link String.startsWith}, endsWith{@link String.endsWith}, RegExp不用说了
+ */
+type ignoreStartsWith = { startsWith: string };
+type ignoreEndsWith = { endsWith: string };
+type ignoreType = ignoreStartsWith | ignoreEndsWith | string | RegExp;
+
+/**
  * 文件代理器配置
  */
 export interface FileProxyConfig {
@@ -427,6 +455,11 @@ export interface FileProxyConfig {
    * 如果是多条命令, 默认目录是输出目录文件夹路径, 并且彼此之间无关联, 如果需要多条命令一起执行, 请使用脚本文件
    */
   after?: string | string[];
+
+  /**
+   * 忽略的目录 -> 在任何时候都会进行忽略的
+   */
+  ignores?: ignoreType | ignoreType[];
 
 }
 
