@@ -44,45 +44,61 @@ export class FileProxy implements IFileProxy {
    * 源代码与输出文件夹路径对照
    * key: 源代码路径, value: 输出文件夹内的路径
    */
-  private readonly _sourcesMapper: FileProxyMapper = {};
+  private readonly _sourceMapper: FileProxyMapper = {};
 
   /**
    * 依赖文件与输出文件夹路径对照
-   * key、value与{@link FileProxy._sourcesMapper}意思一样
+   * key、value与{@link FileProxy._sourceMapper}意思一样
    */
   private readonly _dependenciesMapper: FileProxyMapper = {};
 
   public async init(config: FileProxyConfig): Promise<this> {
     this.config = config;
 
+    // 处理依赖
+    if (this.config.dependencyBase) {
+      if (!(this.config.dependencies instanceof Array)) {
+        this.config.dependencies = [this.config.dependencies];
+      }
+
+      for (let i = 0; i < this.config.dependencies.length; i++) {
+        if (typeof this.config.dependencies[i] === 'string') {
+          this.config.dependencies[i] = path.join(this.config.dependencyBase, this.config.dependencies[i]);
+        } else {
+          const dep = this.config.dependencies[i] as SourceTarget;
+          dep.source = path.join(this.config.dependencyBase, dep.source);
+        }
+      }
+    }
+
     // 处理源码mapper
-    FileProxy.map(this._sourcesMapper, config.sources, config);
+    FileProxy.map(this._sourceMapper, this.config.source, this.config);
 
     // 检查输出文件夹
-    if (fs.existsSync(config.output)) {
+    if (fs.existsSync(this.config.output)) {
       // 检查是否为一个文件夹, 如果是则抛出错误
-      if (!fs.statSync(config.output).isDirectory()) {
+      if (!fs.statSync(this.config.output).isDirectory()) {
         throw new Error('输出目录不是个目录, 请更改输出目录!');
       }
     } else {
       // 创建文件夹
-      fs.mkdirSync(config.output);
+      fs.mkdirSync(this.config.output);
     }
 
     // 拉取依赖
     this.pull();
     // 复制源代码
-    FileProxy.copyWithMapper(this._sourcesMapper, this.config);
+    FileProxy.copyWithMapper(this._sourceMapper, this.config);
 
     // 执行脚本
-    if (config.after) {
-      if (typeof config.after === 'string') {
-        config.after = [config.after];
+    if (this.config.after) {
+      if (typeof this.config.after === 'string') {
+        this.config.after = [this.config.after];
       }
-      for (const a of config.after) {
+      for (const a of this.config.after) {
         if (a) {
           console.log('>', a);
-          const result = await exec(a, { cwd: config.output });
+          const result = await exec(a, { cwd: this.config.output });
           console.log(result.stdout);
           if (result.stderr) console.error(result.stderr);
         }
@@ -100,10 +116,10 @@ export class FileProxy implements IFileProxy {
     FileProxy.map(this._dependenciesMapper, config.dependencies, config, true);
 
     // 如果依赖中输出的文件有和源码相同的, 则将其删除
-    for (const sk in this._sourcesMapper) {
+    for (const sk in this._sourceMapper) {
       for (const dk in this._dependenciesMapper) {
         // noinspection JSUnfilteredForInLoop
-        if (this._dependenciesMapper[dk].target === this._sourcesMapper[sk].target) {
+        if (this._dependenciesMapper[dk].target === this._sourceMapper[sk].target) {
           // noinspection JSUnfilteredForInLoop
           delete this._dependenciesMapper[dk];
         }
@@ -143,7 +159,7 @@ export class FileProxy implements IFileProxy {
     }
 
     // 刷新源代码mapper
-    FileProxy.map(this._sourcesMapper, config.sources, config);
+    FileProxy.map(this._sourceMapper, config.source, config);
 
     return this;
   }
@@ -161,7 +177,7 @@ export class FileProxy implements IFileProxy {
     // 检查是否存在依赖和源代码之外的文件, 如果存在则标记为源代码文件
     const outputs = FileProxy.getEverything(this.config.output, true, this.config.ignores);
     // 合并依赖和源代码mapper
-    const exists = Object.assign({}, this._dependenciesMapper, this._sourcesMapper);
+    const exists = Object.assign({}, this._dependenciesMapper, this._sourceMapper);
     const outputMapper: FileProxyMapper = {};
     for (const key in exists) {
       // noinspection JSUnfilteredForInLoop
@@ -173,11 +189,11 @@ export class FileProxy implements IFileProxy {
       if (!outputMapperKeys.includes(o.target)) {
         let source = '';
         let output = '';
-        if (typeof this.config.sources === 'string') {
-          source = this.config.sources;
+        if (typeof this.config.source === 'string') {
+          source = this.config.source;
         } else {
-          source = this.config.sources.source;
-          output = this.config.sources.target;
+          source = this.config.source.source;
+          output = this.config.source.target;
         }
         source = path.join(source, o.target.substring(this.config.output.length + output.length));
         console.info(source, '@', o.target, 'new');
@@ -186,9 +202,9 @@ export class FileProxy implements IFileProxy {
     });
 
     // 检查指定的源文件是否存在修改的内容
-    for (const key in this._sourcesMapper) {
-      if (this._sourcesMapper.hasOwnProperty(key)) {
-        const value = this._sourcesMapper[key];
+    for (const key in this._sourceMapper) {
+      if (this._sourceMapper.hasOwnProperty(key)) {
+        const value = this._sourceMapper[key];
         // 如果输出目录的源代码文件被删了, 则标记
         if (!fs.existsSync(value.target)) {
           console.info(key, '@', value.target, 'deleted');
@@ -449,11 +465,15 @@ export interface FileProxyConfig {
   dependencies: (SourceTarget | string)[] | string | SourceTarget;
 
   /**
+   * 依赖文件的基础内容, 存在时则会拼接到每个dependencies对应的路径前面
+   */
+  dependencyBase?: string;
+
+  /**
    * 源代码目录, 出现与dependencies相同文件时, 将使用该数据将其覆盖
    * 配置的内容如果不存在, 但输出的文件夹中却存在了, 在pull的时候也会将其复制回来
-   * 内容规则与{@link FileProxyConfig.dependencies}一致
    */
-  sources: string | SourceTarget;
+  source: string | SourceTarget;
 
   /**
    * 生成输出目录之后执行的脚本
@@ -593,8 +613,9 @@ const startInteract = () => {
  * 初始化
  * @param file 初始化的文件
  * @param after 生成输出目录之后执行的脚本
+ * @param overrides 重写配置文件的内容
  */
-const init = (file: string, after: string | string[] = null): void => {
+const init = (file: string, after: string | string[] = null, overrides: any = {}): void => {
   file = FileProxy.parseFilepath(file);
 
   // 如果存在缓存中则清除缓存
@@ -613,6 +634,7 @@ const init = (file: string, after: string | string[] = null): void => {
         config.after.push(...after);
       }
     }
+    config = Object.assign(config, overrides);
     (fp.init(config) as Promise<IFileProxy>).then(() => after ? process.exit(0) : undefined).catch(e => console.error(e));
   } catch (e) {
     console.error('初始化失败:', e);
@@ -621,13 +643,32 @@ const init = (file: string, after: string | string[] = null): void => {
 
 // 解析入参
 
-// ts-node FileProxy.ts [默认配置文件] [输出文档生成之后调用的脚本 [脚本2] ...]
-if (process.argv.length > 3) {
-  init(process.argv[2], process.argv.slice(3));
+// 额外的脚本
+const extraShells = [];
+// 需要被覆盖的内容
+const overrides = {};
+// 配置文件
+let configFile = null;
+
+if (process.argv.length === 2) {
+  // do nothing
+} else if (process.argv.length === 3) {
+  configFile = process.argv[2];
 } else {
-  // ts-node FileProxy.ts [默认配置文件]
-  if (process.argv.length === 3) {
-    init(process.argv[2]);
+  for (let i = 2; i < process.argv.length - 1; i++) {
+    switch (process.argv[i]) {
+      case '-s': extraShells.push(process.argv[++i]); continue;
+      case '-o': {
+        const override = process.argv[++i].split('=');
+        overrides[override[0]] = override[1];
+      } continue;
+      default: console.warn('不支持的命令', process.argv[i]);
+    }
   }
+  configFile = process.argv[process.argv.length - 1];
+}
+
+init(configFile, extraShells.length > 0 ? extraShells : null, overrides);
+if (extraShells.length === 0) {
   startInteract();
 }

@@ -2,10 +2,14 @@ import {FileProxyConfig} from "./FileProxy";
 
 const config: FileProxyConfig = {
     name: '测试配置',
-    output: '/Users/allensnape/Documents/Playground/Typescript/Typescript-FileProxy/test/output',
-    sources: '/Users/allensnape/Documents/Playground/Typescript/Typescript-FileProxy/test/sources',
-    dependencies: '/Users/allensnape/Documents/Playground/Typescript/Typescript-FileProxy/test/dependencies',
-    after: ['ls'],
+    output: 'C:\\Users\\as\\Desktop\\FileProxy\\test\\output',
+    source: 'C:\\Users\\as\\Desktop\\FileProxy\\test\\sources',
+    dependencies: [
+        'test\\dependencies',
+        { source: 'node_modules\\js-md5\\build', target: 'build' }
+    ],
+    dependencyBase: 'C:\\Users\\as\\Desktop\\FileProxy\\',
+    ignores: 'C:\\Users\\as\\Desktop\\FileProxy\\test\\dependencies\\newDep.txt'
 };
 
 module.exports = config;
