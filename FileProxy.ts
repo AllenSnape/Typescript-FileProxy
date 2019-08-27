@@ -18,7 +18,7 @@ const printDocument = (): void => {
   console.info('正在使用的配置文件:', config ? (config.name + ' @ ' + config.path) : '无');
   console.info();
   console.info(' 0/init <配置文件>       : 读取配置文件');
-  console.info(' 1/re-init [配置文件]    : 重新初始化上次读取的文件');
+  // console.info(' 1/re-init [配置文件]    : 重新初始化上次读取的文件');
   console.info(' 2/push                  : 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中');
   console.info(' 3/pull                  : 刷新依赖文件, 并重新复制到输出目录中');
   console.info(' 4/diff                  : 检查是否有修改了的文件');
@@ -645,7 +645,7 @@ const startInteract = () => {
         }
       } break;
 
-      case '1':
+      /*case '1':
       case 're-init': {
         if (config && Object.keys(fp.modified()).length !== 0) {
           console.warn('当前存在未提交代码!');
@@ -656,7 +656,7 @@ const startInteract = () => {
         } else {
           init(config.path);
         }
-      } break;
+      } break;*/
 
       case '2':
       case 'push': if (config) {
