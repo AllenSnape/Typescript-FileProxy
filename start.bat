@@ -39,7 +39,7 @@ powershell -command "(new-object System.Net.WebClient).DownloadFile('%GITHUB_FIL
 cd %FILE_PROXY_FOLDER%
 echo Installing dependencies
 call npm i
-call ts-node FileProxy.ts -o source %WORKPLACE%\test\sources -o dependenciesBase %WORKPLACE%\test\dependencies %WORKPLACE%\test.config.ts
+call ts-node FileProxy.ts -o source=%WORKPLACE%\test\sources -o dependenciesBase=%WORKPLACE%\test\dependencies %WORKPLACE%\test.config.ts
 
 :nodejsRequiredHome
 explorer https://nodejs.org/en/download/

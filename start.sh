@@ -37,4 +37,4 @@ curl $GITHUB_FILE_PROXY_PACKAGE_JSON -o $FILE_PROXY_PACKAGE_JSON
 cd $FILE_PROXY_FOLDER
 echo "Installing dependencies"
 npm i
-ts-node FileProxy.ts -o source "$WORKPLACE\test\sources" -o dependenciesBase "$WORKPLACE\test\dependencies" "$WORKPLACE\test.config.ts"
+ts-node FileProxy.ts -o source="$WORKPLACE\test\sources" -o dependenciesBase="$WORKPLACE\test\dependencies" "$WORKPLACE\test.config.ts"
