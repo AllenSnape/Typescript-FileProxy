@@ -176,7 +176,7 @@ export class FileProxy implements IFileProxy {
           } else {
             // 不存在时直接复制
             console.info('new', key);
-            fs.copyFileSync(modified.target, key);
+            FileProxy.copyFile(modified.target, key);
           }
         } else {
           // 不存在则一并删除源文件
@@ -341,17 +341,26 @@ export class FileProxy implements IFileProxy {
 
         console.log('copy', key, 'to', mapperOutput);
 
-        // 创建文件夹
-        const mapperOutputFolder = mapperOutput.substring(0, mapperOutput.lastIndexOf(path.sep));
-        if (!fs.existsSync(mapperOutputFolder)) fs.mkdirSync(mapperOutputFolder, { recursive: true });
-
-        fs.copyFileSync(key, mapperOutput);
+        // 复制文件
+        this.copyFile(key, mapperOutput);
 
         if (mapper[key].readonly) {
           fs.chmodSync(mapperOutput, 0o444);
         }
       }
     }
+  }
+
+  /**
+   * 复制文件 -> 自动创建不存在的父文件夹
+   * @param src 源文件
+   * @param dist 复制的目的地
+   */
+  private static copyFile(src: string, dist: string): void {
+    const folder = src.substring(0, src.lastIndexOf(path.sep));
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+
+    fs.copyFileSync(src, dist);
   }
 
   /**
