@@ -357,7 +357,7 @@ export class FileProxy implements IFileProxy {
    * @param dist 复制的目的地
    */
   private static copyFile(src: string, dist: string): void {
-    const folder = src.substring(0, src.lastIndexOf(path.sep));
+    const folder = dist.substring(0, dist.lastIndexOf(path.sep));
     if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
 
     fs.copyFileSync(src, dist);
