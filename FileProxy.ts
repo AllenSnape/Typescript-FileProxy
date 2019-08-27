@@ -36,6 +36,11 @@ const printDocument = (): void => {
 export class FileProxy implements IFileProxy {
 
   /**
+   * 记录变化的锁文件, 避免在异常退出后对文件变化追踪的丢失
+   */
+  public static readonly LOCKER_FILENAME = '.fileproxy.locker';
+
+  /**
    * 初始化时的配置
    */
   private config: FileProxyConfig = null;
@@ -55,52 +60,77 @@ export class FileProxy implements IFileProxy {
   public async init(config: FileProxyConfig): Promise<this> {
     this.config = config;
 
-    // 处理依赖
-    if (this.config.dependencyBase) {
-      if (!(this.config.dependencies instanceof Array)) {
-        this.config.dependencies = [this.config.dependencies];
+    // 添加锁文件的忽略
+    this.config.ignores = this.config.ignores instanceof Array ? this.config.ignores : [this.config.ignores];
+    this.config.ignores.push(path.join(this.config.output, FileProxy.LOCKER_FILENAME));
+
+    // 检查是否存在锁文件
+    const locker = this.unlock();
+    if (locker && locker.source && locker.dependencies) {
+      // 清空旧mapper
+      for (const key of Object.keys(this._sourceMapper)) {
+        delete this._sourceMapper[key];
+      }
+      for (const key of Object.keys(this._dependenciesMapper)) {
+        delete this._dependenciesMapper[key];
       }
 
-      for (let i = 0; i < this.config.dependencies.length; i++) {
-        if (typeof this.config.dependencies[i] === 'string') {
-          this.config.dependencies[i] = path.join(this.config.dependencyBase, this.config.dependencies[i]);
-        } else {
-          const dep = this.config.dependencies[i] as SourceTarget;
-          dep.source = path.join(this.config.dependencyBase, dep.source);
+      // 复制锁文件的mapper到系统中去
+      for (const key of Object.keys(locker.source)) {
+        this._sourceMapper[key] = locker.source[key];
+      }
+      for (const key of Object.keys(locker.dependencies)) {
+        this._dependenciesMapper[key] = locker.dependencies[key];
+      }
+
+      this.modified();
+    } else {
+      // 处理依赖
+      if (this.config.dependencyBase) {
+        if (!(this.config.dependencies instanceof Array)) {
+          this.config.dependencies = [this.config.dependencies];
+        }
+
+        for (let i = 0; i < this.config.dependencies.length; i++) {
+          if (typeof this.config.dependencies[i] === 'string') {
+            this.config.dependencies[i] = path.join(this.config.dependencyBase, this.config.dependencies[i]);
+          } else {
+            const dep = this.config.dependencies[i] as SourceTarget;
+            dep.source = path.join(this.config.dependencyBase, dep.source);
+          }
         }
       }
-    }
+      // 处理源码mapper
+      FileProxy.map(this._sourceMapper, this.config.source, this.config);
 
-    // 处理源码mapper
-    FileProxy.map(this._sourceMapper, this.config.source, this.config);
-
-    // 检查输出文件夹
-    if (fs.existsSync(this.config.output)) {
-      // 检查是否为一个文件夹, 如果是则抛出错误
-      if (!fs.statSync(this.config.output).isDirectory()) {
-        throw new Error('输出目录不是个目录, 请更改输出目录!');
+      // 检查输出文件夹
+      if (fs.existsSync(this.config.output)) {
+        // 检查是否为一个文件夹, 如果是则抛出错误
+        if (!fs.statSync(this.config.output).isDirectory()) {
+          throw new Error('输出目录不是个目录, 请更改输出目录!');
+        }
+      } else {
+        // 创建文件夹
+        fs.mkdirSync(this.config.output);
       }
-    } else {
-      // 创建文件夹
-      fs.mkdirSync(this.config.output);
-    }
 
-    // 拉取依赖
-    this.pull();
-    // 复制源代码
-    FileProxy.copyWithMapper(this._sourceMapper, this.config);
+      // 拉取依赖
+      this.pull();
+      // 复制源代码
+      FileProxy.copyWithMapper(this._sourceMapper, this.config);
 
-    // 执行脚本
-    if (this.config.after) {
-      if (typeof this.config.after === 'string') {
-        this.config.after = [this.config.after];
-      }
-      for (const a of this.config.after) {
-        if (a) {
-          console.log('>', a);
-          const result = await exec(a, { cwd: this.config.output });
-          console.log(result.stdout);
-          if (result.stderr) console.error(result.stderr);
+      // 执行脚本
+      if (this.config.after) {
+        if (typeof this.config.after === 'string') {
+          this.config.after = [this.config.after];
+        }
+        for (const a of this.config.after) {
+          if (a) {
+            console.log('>', a);
+            const result = await exec(a, { cwd: this.config.output });
+            console.log(result.stdout);
+            if (result.stderr) console.error(result.stderr);
+          }
         }
       }
     }
@@ -217,7 +247,60 @@ export class FileProxy implements IFileProxy {
     }
     console.info();
 
+    // 写入锁文件
+    this.lock(files);
+
     return files;
+  }
+
+  lock(files: FileProxyMapper): this {
+    const lockerFile = this.getLockerFilename();
+
+    // 检查文件有效性
+    if (fs.existsSync(lockerFile)) {
+      const st = fs.statSync(lockerFile);
+      if (!st.isDirectory()) {
+        FileProxy.rmRf(lockerFile);
+      } else {
+        fs.unlinkSync(lockerFile);
+      }
+    }
+
+    // 存在变化时才写入文件
+    if (Object.keys(files).length > 0) {
+      // 写入的内容
+      const lockerFileContent = {
+        source: this._sourceMapper,
+        dependencies: this._dependenciesMapper,
+        changes: files
+      };
+      fs.writeFileSync(lockerFile, JSON.stringify(lockerFileContent), { mode: 0o444 });
+    }
+
+    return this;
+  }
+
+  unlock(): { source: FileProxyMapper; dependencies: FileProxyMapper; changes: FileProxyMapper } | null {
+    const lockerFile = this.getLockerFilename();
+    if (fs.existsSync(lockerFile)) {
+      if (fs.statSync(lockerFile).isFile()) {
+        try {
+          return JSON.parse(fs.readFileSync(lockerFile));
+        } catch (e) {
+          console.error('解析锁文件失败:', e);
+        }
+      } else {
+        console.error('锁文件解析失败: 锁文件不是个文件!');
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 获取锁文件路径
+   */
+  private getLockerFilename(): string {
+    return path.join(this.config.output, FileProxy.LOCKER_FILENAME);
   }
 
   /**
@@ -410,23 +493,34 @@ export interface IFileProxy {
   /**
    * 根据配置文件进行初始化: 检查目标文件夹、生成文件/文件夹mapper
    */
-  init: (config: FileProxyConfig) => this | Promise<this>;
+  init(config: FileProxyConfig): this | Promise<this>;
 
   /**
    * 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中
    */
-  push: () => this;
+  push(): this;
 
   /**
    * 刷新依赖文件, 并重新复制到输出目录中
    */
-  pull: () => this;
+  pull(): this;
 
   /**
    * 复制过去的源码文件是否被修改过
    * @return 被修改了或新增的文件
    */
-  modified: () => FileProxyMapper;
+  modified(): FileProxyMapper;
+
+  /**
+   * 写入变化内容的锁文件
+   * @param files 文件的变化内容
+   */
+  lock(files: FileProxyMapper): this;
+
+  /**
+   * 读取文件内容
+   */
+  unlock(): { source: FileProxyMapper, dependencies: FileProxyMapper, changes: FileProxyMapper } | null;
 
 }
 
