@@ -655,14 +655,16 @@ if (process.argv.length === 2) {
 } else if (process.argv.length === 3) {
   configFile = process.argv[2];
 } else {
-  for (let i = 2; i < process.argv.length - 1; i++) {
-    switch (process.argv[i]) {
-      case '-s': extraShells.push(process.argv[++i]); continue;
-      case '-o': {
-        const override = process.argv[++i].split('=');
-        overrides[override[0]] = override[1];
-      } continue;
-      default: console.warn('不支持的命令', process.argv[i]);
+  for (let i = 0; i < process.argv.length - 1; i++) {
+    if (process.argv[i].startsWith('-')) {
+      switch (process.argv[i]) {
+        case '-s': extraShells.push(process.argv[++i]); continue;
+        case '-o': {
+          const override = process.argv[++i].split('=');
+          overrides[override[0]] = override[1];
+        } continue;
+        default: console.warn('不支持的命令', process.argv[i]);
+      }
     }
   }
   configFile = process.argv[process.argv.length - 1];
