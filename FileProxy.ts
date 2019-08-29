@@ -502,7 +502,7 @@ export interface IFileProxy {
   /**
    * 根据配置文件进行初始化: 检查目标文件夹、生成文件/文件夹mapper
    */
-  init(config: FileProxyConfig): this | Promise<this>;
+  init(config: FileProxyConfig): Promise<this>;
 
   /**
    * 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中
@@ -641,7 +641,7 @@ interface SourceTarget {
 const fp: IFileProxy = new FileProxy();
 // 开始交互模式
 const startInteract = () => {
-  input.on('data', data => {
+  input.on('data', async data => {
     data = data.toString().substring(0, data.length - (path.sep === '/' ? 1 : 2));
     const args = data.split(' ');
     switch(args[0]) {
@@ -650,7 +650,7 @@ const startInteract = () => {
         if (args.length < 2) {
           console.warn('请添加配置文件!');
         } else {
-          init(args[1]);
+          await init(args[1]);
         }
       } break;
 
@@ -718,7 +718,7 @@ const startInteract = () => {
  * @param after 生成输出目录之后执行的脚本
  * @param overrides 重写配置文件的内容
  */
-const init = (file: string, after: string | string[] = null, overrides: any = {}): void => {
+const init = async (file: string, after: string | string[] = null, overrides: any = {}): Promise<void> => {
   file = FileProxy.parseFilepath(file);
 
   // 如果存在缓存中则清除缓存
@@ -738,7 +738,10 @@ const init = (file: string, after: string | string[] = null, overrides: any = {}
       }
     }
     config = Object.assign(config, overrides);
-    (fp.init(config) as Promise<IFileProxy>).then(() => after ? process.exit(0) : undefined).catch(e => console.error(e));
+    await fp.init(config);
+    if (after) {
+      process.exit(0)
+    }
   } catch (e) {
     console.error('初始化失败:', e);
   }
@@ -773,7 +776,8 @@ if (process.argv.length === 2) {
   configFile = process.argv[process.argv.length - 1];
 }
 
-init(configFile, extraShells.length > 0 ? extraShells : null, overrides);
-if (extraShells.length === 0) {
-  startInteract();
-}
+init(configFile, extraShells.length > 0 ? extraShells : null, overrides).then(() => {
+  if (extraShells.length === 0) {
+    startInteract();
+  }
+});
