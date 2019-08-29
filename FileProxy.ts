@@ -17,7 +17,7 @@ const printDocument = (): void => {
   console.info();
   console.info('正在使用的配置文件:', config ? (config.name + ' @ ' + config.path) : '无');
   console.info();
-  console.info(' 0/init <配置文件>       : 读取配置文件');
+  // console.info(' 0/init <配置文件>       : 读取配置文件');
   // console.info(' 1/re-init [配置文件]    : 重新初始化上次读取的文件');
   console.info(' 2/push                  : 从生成的文件夹中读取修改了的文件, 并将他们复制到源码中');
   console.info(' 3/pull                  : 刷新依赖文件, 并重新复制到输出目录中');
@@ -645,14 +645,14 @@ const startInteract = () => {
     data = data.toString().substring(0, data.length - (path.sep === '/' ? 1 : 2));
     const args = data.split(' ');
     switch(args[0]) {
-      case '0':
+      /*case '0':
       case 'init': {
         if (args.length < 2) {
           console.warn('请添加配置文件!');
         } else {
           await init(args[1]);
         }
-      } break;
+      } break;*/
 
       /*case '1':
       case 're-init': {
