@@ -641,7 +641,7 @@ interface SourceTarget {
 const fp: IFileProxy = new FileProxy();
 // 开始交互模式
 const startInteract = () => {
-  input.on('data', async data => {
+  input.on('data', async (data: any) => {
     data = data.toString().substring(0, data.length - (path.sep === '/' ? 1 : 2));
     const args = data.split(' ');
     switch(args[0]) {
